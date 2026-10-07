@@ -2,6 +2,8 @@ from fastapi import FastAPI, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.responses import RedirectResponse
+from fastapi import Depends
+from fastapi import HTTPException
 from app.db import get_db_connection
 from typing import Annotated
 from psycopg.errors import UniqueViolation
@@ -14,6 +16,25 @@ import hashlib
 
 app = FastAPI()
 templates = Jinja2Templates(directory="app/templates")
+
+def get_current_user(request: Request):
+    session_token = request.cookies.get("session_token")
+    if not session_token:
+        raise HTTPException(status_code=303, headers={"Location": "/login"})
+    session_token_hash = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM sessions WHERE created_at > now() - interval '24 hours' AND session_token_hash = %s", (session_token_hash,))
+            result = cur.fetchone()
+            if result is None:
+                raise HTTPException(status_code=303, headers={"Location": "/login"})
+            user_id = result[0]
+            cur.execute("SELECT username FROM users WHERE user_id = %s", (user_id,))
+            user_result = cur.fetchone()
+            if user_result is None:
+                raise HTTPException(status_code=303, headers={"Location": "/login"})
+            username = user_result[0]
+            return {"user_id": user_id, "username": username}
 
 def validate_username(username: str) -> str | None:
     # For example, check against a database of users
@@ -112,3 +133,7 @@ def login_post(request: Request, username: Annotated[str, Form()], password: Ann
             cur.execute("INSERT INTO sessions (user_id, session_token_hash) VALUES (%s, %s)", (user_id, session_token_hash))
             conn.commit() 
             return response
+
+@app.get("/dashboard")
+def dashboard(request: Request, current_user: dict = Depends(get_current_user)):
+    return templates.TemplateResponse(request, "dashboard.html", {"username": current_user["username"]})
