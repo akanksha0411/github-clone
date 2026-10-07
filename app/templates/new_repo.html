@@ -1,0 +1,15 @@
+<html>
+    <head>
+        <title>New Repository</title>
+    </head>
+    <body>
+        <h1>Create New Repository</h1>
+        <form method="post" action="/new">
+            <input type="text" name="repo_name" placeholder="Repository Name" value="{{ repo_name or ''}}" required>
+            <input type="text" name="repo_description" placeholder="Description" value="{{ repo_description or ''}}">
+            <button type="submit">Create Repository</button>
+            {% if error %}
+                <p style="color: red;">{{ error }}</p>
+            {% endif %}
+        </form>
+</html>

@@ -73,6 +73,22 @@ def validate_password(password: str) -> str | None:
         return "Password must contain at least one special character (!@#$%^&*(),.?\":{}|<>)"
     return None  # Valid password
 
+def validate_repo_name(repo_name: str) -> str | None:
+    if not repo_name:
+        return "Repository name cannot be empty"
+    if len(repo_name) < 3 or len(repo_name) > 100:
+        return "Repository name length must be between 3 and 100 characters"
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", repo_name):
+        return "Repository name can only contain letters, digits, hyphens, and underscores"
+    if repo_name[0] not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        return "Repository name must start with a letter"
+    return None  # Valid repository name
+
+def validate_repo_description(repo_description: str) -> str | None:
+    if len(repo_description) > 500:
+        return "Repository description cannot exceed 500 characters"
+    return None  # Valid repository description
+
 @app.get("/")
 def root(request: Request):
     return templates.TemplateResponse(request, "greetings.html", {"name": "github Clone"})
@@ -150,3 +166,40 @@ def logout(request: Request):
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(key="session_token", secure=True, httponly=True, samesite="lax")
     return response
+
+@app.get("/new")
+def new_repo(request: Request, current_user: dict = Depends(get_current_user)):
+    return templates.TemplateResponse(request, "new_repo.html", {"username": current_user["username"]})
+
+@app.post("/new")
+def new_repo_post(request: Request, repo_name: Annotated[str, Form()], repo_description: Annotated[str, Form()] = "", current_user: dict = Depends(get_current_user)):
+    if not repo_name:
+        return templates.TemplateResponse(request, "new_repo.html", {"error": "Repository name cannot be empty", "username": current_user["username"]})
+    if validate_repo_name(repo_name) is not None:
+        return templates.TemplateResponse(request, "new_repo.html", {"error": validate_repo_name(repo_name), "username": current_user["username"], "repo_name": repo_name, "repo_description": repo_description})
+    if validate_repo_description(repo_description) is not None:
+        return templates.TemplateResponse(request, "new_repo.html", {"error": validate_repo_description(repo_description), "username": current_user["username"], "repo_name": repo_name, "repo_description": repo_description})
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute("INSERT INTO repos (repo_name, repo_description, owner_id) VALUES (%s, %s, %s)", (repo_name, repo_description, current_user["user_id"]))
+                conn.commit()
+            except UniqueViolation:
+                return templates.TemplateResponse(request, "new_repo.html", {"error": "Repository name already exists", "username": current_user["username"], "repo_name": repo_name, "repo_description": repo_description})
+    return RedirectResponse(url=f"/{current_user['username']}/{repo_name}", status_code=303)
+
+@app.get("/{username}/{repo_name}")
+def view_repo(request: Request, username: str, repo_name: str, current_user: dict = Depends(get_current_user)):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            username = username.lower()
+            cur.execute("SELECT repo_id, repo_name, owner_id, repo_description FROM repos JOIN users ON repos.owner_id = users.user_id WHERE lower(repos.repo_name) = lower(%s) AND users.username = %s", (repo_name, username))
+            repo = cur.fetchone()
+            if repo is None:
+                return templates.TemplateResponse(request, "repo_not_found.html", {"repo_name": repo_name, "username": current_user["username"]}, status_code=404)
+            repo_id, repo_name, owner_id, repo_description = repo
+            # Check if the current user is the owner of the repository
+            is_owner = (owner_id == current_user["user_id"])
+            return templates.TemplateResponse(request, "view_repo.html", {"repo_name": repo_name, "is_owner": is_owner, "username": current_user["username"], "repo_description": repo_description})
+        
