@@ -3,11 +3,14 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.responses import RedirectResponse
 from app.db import get_db_connection
-import re
-import bcrypt
-
 from typing import Annotated
 from psycopg.errors import UniqueViolation
+
+import re
+import bcrypt
+import secrets
+import hashlib
+
 
 app = FastAPI()
 templates = Jinja2Templates(directory="app/templates")
@@ -80,3 +83,32 @@ def signup_post(request: Request, username: Annotated[str, Form()], password: An
         elif error_pass:
             error = error_pass
         return templates.TemplateResponse(request, "signup.html", {"error": str(error), "username": username}) 
+
+@app.get("/login")
+def login(request: Request):
+    return templates.TemplateResponse(request, "login.html", {})
+
+@app.post("/login")
+def login_post(request: Request, username: Annotated[str, Form()], password: Annotated[str, Form()]):
+    username = username.lower()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id, password_hash FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
+            if user is None:
+                return templates.TemplateResponse(request, "login.html", {"error": "Invalid username or password", "username": username})
+            user_id, password_hash = user
+            if not bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8")):
+                return templates.TemplateResponse(request, "login.html", {"error": "Invalid username or password", "username": username})
+            # Generate a session token
+            session_token = secrets.token_urlsafe(32)
+            session_token_hash = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+            
+
+            response = RedirectResponse(url="/dashboard", status_code=303)
+            response.set_cookie(key="session_token", value=session_token, httponly=True, max_age=3600*24, samesite="lax", secure=True) # 1 day
+
+            # Store the session token hash in the database
+            cur.execute("INSERT INTO sessions (user_id, session_token_hash) VALUES (%s, %s)", (user_id, session_token_hash))
+            conn.commit() 
+            return response
