@@ -137,3 +137,16 @@ def login_post(request: Request, username: Annotated[str, Form()], password: Ann
 @app.get("/dashboard")
 def dashboard(request: Request, current_user: dict = Depends(get_current_user)):
     return templates.TemplateResponse(request, "dashboard.html", {"username": current_user["username"]})
+
+@app.post("/logout")
+def logout(request: Request):
+    session_token = request.cookies.get("session_token")
+    if session_token:
+        session_token_hash = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sessions WHERE session_token_hash = %s", (session_token_hash,))
+                conn.commit()
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(key="session_token", secure=True, httponly=True, samesite="lax")
+    return response
