@@ -5,6 +5,18 @@
     <body>
         <h1>Dashboard</h1>
         <p>Welcome, {{ username }}!</p>
+        <h2>Your Repositories</h2>
+        <ul>
+            {% for repo in repos %}
+                <li>
+                    <a href="/{{ username }}/{{ repo[0] }}">{{ repo[0] }}</a>
+                    <p>{{ repo[1] if repo[1] else "No description available." }}</p>
+                </li>
+            {% else %}
+                <p>You have no repositories. <a href="/new">Create Repo</a>.</p>
+            {% endfor %}
+        </ul>
+        <a href="/new">Create New Repository</a>
         <form method="post" action="/logout">
             <button type="submit">Logout</button>
         </form>
